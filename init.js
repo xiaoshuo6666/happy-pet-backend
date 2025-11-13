@@ -8,19 +8,37 @@ async function initializeDatabase() {
     try {
         console.log('🚀 开始初始化 Happy Pet 数据库...');
         
-        // 使用 createConnection 而不是 createPool
+        // 检查是否在 Render 环境
+        const isRender = process.env.RENDER || process.env.NODE_ENV === 'production';
+        
+        if (isRender) {
+            console.log('🌐 检测到 Render 环境，需要外部数据库');
+            console.log('💡 请在 Render 环境变量中设置数据库连接信息');
+            console.log('📋 需要设置: DB_HOST, DB_USER, DB_PASSWORD, DB_NAME');
+            return;
+        }
+        
+        // 本地开发环境使用原有配置
         connection = mysql.createConnection({
             host: process.env.DB_HOST || 'localhost',
             user: process.env.DB_USER || 'root',
             password: process.env.DB_PASSWORD || '',
-            multipleStatements: true, // 允许执行多条语句
-            charset: 'utf8mb4'
+            multipleStatements: true,
+            charset: 'utf8mb4',
+            // 添加超时设置
+            connectTimeout: 60000,
+            acquireTimeout: 60000,
+            timeout: 60000
         });
 
         // 使用回调方式连接
         connection.connect((err) => {
             if (err) {
                 console.error('❌ MySQL 连接失败:', err.message);
+                console.log('💡 解决方案:');
+                console.log('   1. 确保 MySQL 服务正在运行');
+                console.log('   2. 检查 .env 文件中的数据库配置');
+                console.log('   3. 或使用外部数据库服务');
                 return;
             }
             console.log('✅ MySQL 连接成功！');
@@ -28,13 +46,18 @@ async function initializeDatabase() {
         });
 
         function executeSqlStatements() {
-            // 读取 SQL 文件
             const sqlPath = path.join(__dirname, 'schema.sql');
-            console.log('📖 读取 SQL 文件...');
+            console.log('📖 读取 SQL 文件:', sqlPath);
+            
+            // 检查 SQL 文件是否存在
+            if (!fs.existsSync(sqlPath)) {
+                console.error('❌ SQL 文件不存在:', sqlPath);
+                connection.end();
+                return;
+            }
             
             const sqlFile = fs.readFileSync(sqlPath, 'utf8');
             
-            // 执行整个 SQL 文件
             connection.query(sqlFile, (error, results) => {
                 if (error) {
                     console.error('❌ SQL 执行错误:', error.message);
@@ -42,14 +65,13 @@ async function initializeDatabase() {
                     if (error.code === 'ER_TABLE_EXISTS_ERROR' || error.code === 'ER_DUP_FIELDNAME') {
                         console.log('⚠️  表或字段已存在，继续执行...');
                     } else {
+                        console.log('🔧 详细错误:', error);
                         connection.end();
                         return;
                     }
                 }
                 
-                console.log('✅ SQL 语句执行完成');
-                
-                // 插入初始数据
+                console.log('✅ 数据库表创建完成');
                 insertInitialData();
             });
         }
@@ -85,12 +107,22 @@ async function initializeDatabase() {
             connection.query(initialDataSQL, (error, results) => {
                 if (error) {
                     console.error('❌ 初始数据插入错误:', error.message);
+                    // 忽略重复插入错误
+                    if (error.code === 'ER_DUP_ENTRY') {
+                        console.log('⚠️  初始数据已存在，跳过插入');
+                    }
                 } else {
                     console.log('✅ 初始数据插入成功');
+                    console.log('📊 插入统计:', {
+                        pet_types: results[0]?.affectedRows || 0,
+                        case_types: results[1]?.affectedRows || 0,
+                        faqs: results[2]?.affectedRows || 0
+                    });
                 }
                 
                 console.log('🎉 数据库初始化完成！');
                 connection.end();
+                process.exit(0);
             });
         }
 
@@ -99,8 +131,13 @@ async function initializeDatabase() {
         if (connection) {
             connection.end();
         }
+        process.exit(1);
     }
 }
 
-// 执行初始化
-initializeDatabase();
+// 只有直接运行时才执行
+if (require.main === module) {
+    initializeDatabase();
+}
+
+module.exports = initializeDatabase;
