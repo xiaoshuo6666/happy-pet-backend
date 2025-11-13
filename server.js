@@ -8,19 +8,25 @@ const path = require('path');
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
 // 中介軟體
 app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static('uploads'));
 
-// 資料庫連接配置
+// 資料庫連接配置 - 适应 Render 环境
 const dbConfig = {
     host: process.env.DB_HOST || 'localhost',
     user: process.env.DB_USER || 'root',
     password: process.env.DB_PASSWORD || '',
-    database: process.env.DB_NAME || 'happy_pet'
+    database: process.env.DB_NAME || 'happy_pet',
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+    acquireTimeout: 60000,
+    timeout: 60000,
+    reconnect: true
 };
 
 // 創建資料庫連接池
@@ -46,7 +52,15 @@ const upload = multer({
         fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5 * 1024 * 1024
     }
 });
-
+// 健康检查端点 - Render 需要
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    service: 'Happy Pet Backend',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
 // 認證中介軟體 - 修復版本
 const authenticateToken = async (req, res, next) => {
     const authHeader = req.headers['authorization'];
@@ -464,8 +478,10 @@ app.get('/', (req, res) => {
 });
 
 // 啟動伺服器
-app.listen(PORT, () => {
-    console.log(`🎉 Happy Pet 伺服器運行在 http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🎉 Happy Pet 伺服器運行在端口 ${PORT}`);
+    console.log(`🔗 本地访问: http://localhost:${PORT}`);
+    console.log(`🌐 环境: ${process.env.NODE_ENV || 'development'}`);
 });
 
 // ==========================================
@@ -1489,4 +1505,5 @@ app.post('/api/chat/upload', authenticateToken, upload.single('file'), async (re
     console.error('上传文件错误:', error);
     res.status(500).json({ error: '文件上传失败' });
   }
+
 });
